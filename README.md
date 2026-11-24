@@ -5,19 +5,35 @@ Blynk. Orb 1 displays the hub sensor; Orbs 2-5 display Nodes 1-4.
 Temperatures arrive in Celsius and are displayed in Fahrenheit. The segmented
 scale fills clockwise from 30 to 110 F and clamps at either end; the numeric
 reading still shows the actual temperature outside that range. Readings start
-as placeholders. The status line shows the Wi-Fi/Blynk connection state; the
-most recent readings remain visible when disconnected and may be stale.
+as placeholders. Orb 1's status line shows this device's Wi-Fi/Blynk
+connection state; `Online` means the Orbs are connected to Blynk. The most
+recent readings remain visible when disconnected and may be stale.
 
-| Screen | Source | Temperature (C, double) | Humidity (%, double) | Last contact (HH:MM, string) | Battery voltage (V, double) | Battery (%) |
-| --- | --- | --- | --- | --- | --- | --- |
-| Orb 1 | Hub | V8 | V9 | V14 | - | - |
-| Orb 2 | Node 1 | V0 | V4 | V10 | V20 | V30 |
-| Orb 3 | Node 2 | V1 | V5 | V11 | V21 | V31 |
-| Orb 4 | Node 3 | V2 | V6 | V12 | V22 | V32 |
-| Orb 5 | Node 4 | V3 | V7 | V13 | V23 | V33 |
+| Screen | Source | Temperature (C, double) | Humidity (%, double) | Elapsed since report (string) | Battery (%) |
+| --- | --- | --- | --- | --- | --- |
+| Orb 1 | Hub | V8 | V9 | V14 | - |
+| Orb 2 | Node 1 | V0 | V4 | V10 | V30 |
+| Orb 3 | Node 2 | V1 | V5 | V11 | V31 |
+| Orb 4 | Node 3 | V2 | V6 | V12 | V32 |
+| Orb 5 | Node 4 | V3 | V7 | V13 | V33 |
 
-Last-contact values are shown exactly as received; the Orbs do not calculate
-elapsed time. Node screens show both battery percentage and voltage.
+V10-V14 contain elapsed time in hours and minutes since the last report,
+updated by the hub every minute and reset to `00:00` on a report. Node
+datastreams show `--:--` before first contact. The hub changes V10-V13 to
+`OFFLINE HH:MM` after 90 minutes without a node report (three missed 30-minute
+wake cycles), and sends one `node_offline` event per offline period. Elapsed
+time is capped at `99:59`. The Orbs show `Online` for node `HH:MM` values
+and `Offline` for `OFFLINE HH:MM`, displaying the elapsed time separately
+as `Updated HH:MM`.
+The hub determines the timeout; the Orbs do not calculate it. A missing,
+`--:--`, or unrecognized value shows `Unknown`.
+Node statuses also become `Unknown` if the Orbs lose Blynk connectivity, and
+are restored as contact values are synchronized on reconnect. While connected,
+statuses reflect the most recently received values and can be stale if the hub
+stops updating them. `Online` is green, `Offline` orange, and `Unknown` red;
+other connection messages are white. Node screens show battery percentage in
+red below 10%, and white at 10% or above. Battery voltage is not displayed;
+V20-V23 are no longer read or synchronized by the Orbs.
 
 ## Hardware
 
@@ -71,7 +87,8 @@ pre-created device token.
    pio device monitor -b 115200
    ```
 
-4. On first startup, the displays show `Add in Blynk app`. Enable Bluetooth
+4. On first startup, Orb 1 shows `Add in Blynk app`; the node statuses show
+   `Unknown` until their contact values are received. Enable Bluetooth
    and any permissions requested by the Blynk app on your phone. Sign into the
    account that owns the template, choose **Add New Device → Find Devices
    Nearby**, and follow the prompts to connect it to your 2.4 GHz Wi-Fi.
@@ -94,8 +111,8 @@ reserves that pin as `BUSY_PIN`; connection status is shown on the displays.
 
 The cloud connection uses TLS. Although Edgent includes OTA support, the
 current partition table has only one app slot and does not support OTA
-updates. If the template ID is missing or still a placeholder, the displays
-show `Set template ID` and provisioning does not start. Edgent may print
+updates. If the template ID is missing or still a placeholder, Orb 1 shows
+`Set template ID` and provisioning does not start. Edgent may print
 credentials during migration, so do not share unredacted serial logs.
 
 The pin defaults and SPI clock are in `firmware/config/config.system.h`.

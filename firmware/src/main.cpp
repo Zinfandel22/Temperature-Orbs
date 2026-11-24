@@ -46,12 +46,11 @@ struct OrbDisplay {
     lv_obj_t* contact;
     lv_obj_t* status;
     int scaleDegrees;
-    char batteryLevel[8];
-    char batteryVoltage[16];
 };
 
 OrbDisplay orbs[displayCount];
 bool edgentStarted = false;
+bool wasBlynkConnected = false;
 
 void flushDisplay(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* pixels) {
     const int pin = *static_cast<const int*>(driver->user_data);
@@ -62,9 +61,18 @@ void flushDisplay(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* pixe
     lv_disp_flush_ready(driver);
 }
 
-void setStatus(const char* status) {
-    for (OrbDisplay& orb : orbs) {
-        lv_label_set_text(orb.status, status);
+void setStatusLabel(lv_obj_t* label, const char* status) {
+    lv_color_t color = lv_color_white();
+    if (strcmp(status, "Online") == 0) color = lv_color_hex(0x00ff00);
+    else if (strcmp(status, "Offline") == 0) color = lv_color_hex(0xffa500);
+    else if (strcmp(status, "Unknown") == 0) color = lv_color_hex(0xff0000);
+    lv_label_set_text(label, status);
+    lv_obj_set_style_text_color(label, color, 0);
+}
+
+void clearNodeStatuses() {
+    for (size_t i = 1; i < displayCount; ++i) {
+        setStatusLabel(orbs[i].status, "Unknown");
     }
 }
 
@@ -113,10 +121,6 @@ lv_obj_t* createLabel(lv_obj_t* screen, const lv_font_t* font, int y, const char
     return label;
 }
 
-void updateBatteryLabel(OrbDisplay& orb) {
-    lv_label_set_text_fmt(orb.battery, "Battery %s  %s", orb.batteryLevel, orb.batteryVoltage);
-}
-
 bool parseNumber(const char* text, double& value) {
     errno = 0;
     char* end = nullptr;
@@ -131,11 +135,28 @@ void updateReading(uint16_t pin, const char* text) {
     if (mapping.field == OrbField::None) return;
     OrbDisplay& orb = orbs[mapping.orb];
     if (mapping.field == OrbField::LastContact) {
+        const char* elapsed = text;
+        if (mapping.orb != 0) {
+            const NodeStatus status = nodeStatusFromContact(text);
+            switch (status) {
+            case NodeStatus::Online: setStatusLabel(orb.status, "Online"); break;
+            case NodeStatus::Offline:
+                setStatusLabel(orb.status, "Offline");
+                elapsed += sizeof("OFFLINE ") - 1;
+                break;
+            case NodeStatus::Unknown:
+                setStatusLabel(orb.status, "Unknown");
+                if (strcmp(text, "--:--") != 0) {
+                    Serial.printf("Invalid node contact time on V%u\n", static_cast<unsigned>(pin));
+                }
+                break;
+            }
+        }
         if (*text == '\0') {
             Serial.printf("Empty contact time on V%u\n", static_cast<unsigned>(pin));
             return;
         }
-        lv_label_set_text_fmt(orb.contact, "Last %s", text);
+        lv_label_set_text_fmt(orb.contact, "Updated %s", elapsed);
         return;
     }
 
@@ -152,7 +173,7 @@ void updateReading(uint16_t pin, const char* text) {
             Serial.printf("Temperature out of range on V%u\n", static_cast<unsigned>(pin));
             return;
         }
-        snprintf(formatted, sizeof(formatted), "%.1f F", fahrenheit);
+        snprintf(formatted, sizeof(formatted), "%.1f \xC2\xB0" "F", fahrenheit);
         lv_label_set_text(orb.temperature, formatted);
         orb.scaleDegrees = temperatureScaleDegrees(fahrenheit);
         lv_obj_invalidate(orb.screen);
@@ -162,18 +183,17 @@ void updateReading(uint16_t pin, const char* text) {
         snprintf(formatted, sizeof(formatted), "%.1f %%", value);
         lv_label_set_text(orb.humidity, formatted);
         break;
-    case OrbField::BatteryVoltage:
-        snprintf(orb.batteryVoltage, sizeof(orb.batteryVoltage), "%.2f V", value);
-        updateBatteryLabel(orb);
-        break;
-    case OrbField::BatteryLevel:
+    case OrbField::BatteryLevel: {
         if (value < 0 || value > 100 || value != floor(value)) {
             Serial.printf("Invalid battery percentage on V%u\n", static_cast<unsigned>(pin));
             return;
         }
-        snprintf(orb.batteryLevel, sizeof(orb.batteryLevel), "%d%%", static_cast<int>(value));
-        updateBatteryLabel(orb);
+        const int percentage = static_cast<int>(value);
+        lv_label_set_text_fmt(orb.battery, "Battery %d%%", percentage);
+        lv_obj_set_style_text_color(orb.battery,
+                                    isLowBatteryPercentage(percentage) ? lv_color_hex(0xff0000) : lv_color_white(), 0);
         break;
+    }
     default:
         break;
     }
@@ -223,17 +243,16 @@ void initializeDisplays() {
             snprintf(title, sizeof(title), "Node %u", static_cast<unsigned>(i));
         }
         createLabel(orb.screen, &lv_font_montserrat_14, 33, title);
-        orb.temperature = createLabel(orb.screen, &lv_font_montserrat_40, 55, "--.- F");
+        orb.temperature = createLabel(orb.screen, &lv_font_montserrat_40, 55, "--.- \xC2\xB0" "F");
         orb.humidity = createLabel(orb.screen, &lv_font_montserrat_28, 105, "--.- %");
         createLabel(orb.screen, &lv_font_montserrat_14, 137, "HUMIDITY");
         if (i != 0) {
-            snprintf(orb.batteryLevel, sizeof(orb.batteryLevel), "--%%");
-            snprintf(orb.batteryVoltage, sizeof(orb.batteryVoltage), "-- V");
-            orb.battery = createLabel(orb.screen, &lv_font_montserrat_14, 154, "");
-            updateBatteryLabel(orb);
+            orb.battery = createLabel(orb.screen, &lv_font_montserrat_14, 154, "Battery --%");
         }
-        orb.contact = createLabel(orb.screen, &lv_font_montserrat_14, 172, "Last --:--");
-        orb.status = createLabel(orb.screen, &lv_font_montserrat_14, 193, "Starting...");
+        orb.contact = createLabel(orb.screen, &lv_font_montserrat_14, 172, "Updated --:--");
+        orb.status = createLabel(orb.screen, &lv_font_montserrat_14, 193,
+                                 i == 0 ? "Starting..." : "Unknown");
+        if (i != 0) setStatusLabel(orb.status, "Unknown");
     }
 }
 void serviceDisplay() {
@@ -243,21 +262,20 @@ void serviceDisplay() {
     case Edgent::MODE_WAIT_CONFIG: status = "Add in Blynk app"; break;
     case Edgent::MODE_CONNECTING_NET: status = "Connecting Wi-Fi"; break;
     case Edgent::MODE_CONNECTING_CLOUD: status = "Connecting Blynk"; break;
-    case Edgent::MODE_RUNNING: status = "Online"; break;
+    case Edgent::MODE_RUNNING: status = Blynk.connected() ? "Online" : "Connecting Blynk"; break;
     case Edgent::MODE_OTA_UPGRADE: status = "Updating..."; break;
     case Edgent::MODE_RESET_CONFIG: status = "Resetting setup"; break;
     default: status = "Provisioning error"; break;
     }
     Serial.println(status);
-    setStatus(status);
+    setStatusLabel(orbs[0].status, status);
 }
 } // namespace
 
 BLYNK_CONNECTED() {
     Serial.println("Blynk connected; syncing hub and node readings");
     Blynk.syncVirtual(V0, V1, V2, V3, V4, V5, V6, V7, V8, V9,
-                      V10, V11, V12, V13, V14, V20, V21, V22, V23,
-                      V30, V31, V32, V33);
+                      V10, V11, V12, V13, V14, V30, V31, V32, V33);
 }
 
 BLYNK_WRITE_DEFAULT() {
@@ -272,7 +290,7 @@ void setup() {
     if (!String(BLYNK_TEMPLATE_ID).startsWith("TMPL") ||
         strlen(BLYNK_TEMPLATE_NAME) == 0) {
         Serial.println("Set a valid Blynk template ID and name before provisioning.");
-        setStatus("Set template ID");
+        setStatusLabel(orbs[0].status, "Set template ID");
         return;
     }
     BlynkEdgent.setConfigTimeout(10 * 60);
@@ -286,7 +304,7 @@ void setup() {
     edgentStarted = BlynkEdgent.begin();
     if (!edgentStarted) {
         Serial.println("Failed to start Blynk Edgent");
-        setStatus("Blynk setup error");
+        setStatusLabel(orbs[0].status, "Blynk setup error");
         return;
     }
     BlynkEdgent.initConsole(Serial);
@@ -296,6 +314,12 @@ void loop() {
     if (edgentStarted) {
         BlynkEdgent.run();
         interaction.run();
+        const bool connected = Blynk.connected();
+        if (connected != wasBlynkConnected) {
+            if (!connected) clearNodeStatuses();
+            serviceDisplay();
+            wasBlynkConnected = connected;
+        }
     }
     lv_timer_handler();
     delay(5);

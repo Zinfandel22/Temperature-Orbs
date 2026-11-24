@@ -11,7 +11,6 @@ constexpr bool allNodeMappings() {
         if (!hasMapping(node, orb, OrbField::Temperature) ||
             !hasMapping(node + 4, orb, OrbField::Humidity) ||
             !hasMapping(node + 10, orb, OrbField::LastContact) ||
-            !hasMapping(node + 20, orb, OrbField::BatteryVoltage) ||
             !hasMapping(node + 30, orb, OrbField::BatteryLevel)) return false;
     }
     return true;
@@ -27,8 +26,8 @@ static_assert(hasMapping(4, 1, OrbField::Humidity), "node 1 humidity");
 static_assert(hasMapping(7, 4, OrbField::Humidity), "node 4 humidity");
 static_assert(hasMapping(10, 1, OrbField::LastContact), "node 1 contact");
 static_assert(hasMapping(13, 4, OrbField::LastContact), "node 4 contact");
-static_assert(hasMapping(20, 1, OrbField::BatteryVoltage), "node 1 voltage");
-static_assert(hasMapping(23, 4, OrbField::BatteryVoltage), "node 4 voltage");
+static_assert(hasMapping(20, 0, OrbField::None), "node 1 voltage is not displayed");
+static_assert(hasMapping(23, 0, OrbField::None), "node 4 voltage is not displayed");
 static_assert(hasMapping(30, 1, OrbField::BatteryLevel), "node 1 battery");
 static_assert(hasMapping(33, 4, OrbField::BatteryLevel), "node 4 battery");
 static_assert(hasMapping(15, 0, OrbField::None), "unused pin");
@@ -36,8 +35,23 @@ static_assert(hasMapping(24, 0, OrbField::None), "unused voltage pin");
 static_assert(hasMapping(34, 0, OrbField::None), "unused battery pin");
 static_assert(fahrenheitFromCelsius(0) == 32, "freezing point");
 static_assert(fahrenheitFromCelsius(100) == 212, "boiling point");
+static_assert(isLowBatteryPercentage(0), "empty battery");
+static_assert(isLowBatteryPercentage(9), "below low battery threshold");
+static_assert(!isLowBatteryPercentage(10), "at low battery threshold");
+static_assert(!isLowBatteryPercentage(100), "full battery");
 static_assert(temperatureScaleDegrees(20) == 0, "clamp below 30 F");
 static_assert(temperatureScaleDegrees(30) == 0, "scale minimum");
 static_assert(temperatureScaleDegrees(70) == 135, "scale midpoint");
 static_assert(temperatureScaleDegrees(110) == 270, "scale maximum");
 static_assert(temperatureScaleDegrees(120) == 270, "clamp above 110 F");
+static_assert(nodeStatusFromContact("00:00") == NodeStatus::Online, "online after a report");
+static_assert(nodeStatusFromContact("01:29") == NodeStatus::Online, "online before timeout");
+static_assert(nodeStatusFromContact("OFFLINE 01:30") == NodeStatus::Offline, "offline at timeout");
+static_assert(nodeStatusFromContact("OFFLINE 99:59") == NodeStatus::Offline, "capped elapsed time");
+static_assert(nodeStatusFromContact("--:--") == NodeStatus::Unknown, "no contact yet");
+static_assert(nodeStatusFromContact("") == NodeStatus::Unknown, "empty contact");
+static_assert(nodeStatusFromContact("OFFLINE") == NodeStatus::Unknown, "missing offline time");
+static_assert(nodeStatusFromContact("OFFLINE 100:00") == NodeStatus::Unknown, "hours exceed cap");
+static_assert(nodeStatusFromContact("12:60") == NodeStatus::Unknown, "invalid minutes");
+static_assert(nodeStatusFromContact("12:34 extra") == NodeStatus::Unknown, "unexpected suffix");
+static_assert(nodeStatusFromContact("offline 12:34") == NodeStatus::Unknown, "unexpected format");
