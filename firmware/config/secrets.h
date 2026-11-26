@@ -1,0 +1,8 @@
+#ifndef ORBS_SECRETS_H
+#define ORBS_SECRETS_H
+
+#define BLYNK_TEMPLATE_ID "TMPL2wFtN5RZT"
+#define BLYNK_TEMPLATE_NAME "EnvMonitorSys"
+#define BLYNK_FIRMWARE_VERSION "1.0.0"
+
+#endif
